@@ -27,3 +27,27 @@ def analyse(requirements: list[Requirement]) -> list[QualityIssue]:
             if normalized and len(normalized & other) / len(normalized | other) > 0.72:
                 issues.append(QualityIssue(id=f"QI-{len(issues)+1:03d}", requirement_id=first.id, check="Duplication", severity="Medium", message=f"Potential overlap with {second.id}.", recommendation="Merge, differentiate scope, or link the requirements."))
     return issues
+
+
+def clarification_questions(issues: list[QualityIssue]) -> list[str]:
+    """Create an actionable stakeholder clarification queue from quality findings."""
+    prompts = {
+        "Ambiguity": "What measurable threshold or observable outcome should replace the qualitative wording?",
+        "Potential incompleteness": "Who performs this action, what triggers it, and what happens if it cannot complete?",
+        "Lack of testability": "What pass/fail test, test data, and expected result will verify this requirement?",
+        "Missing evidence": "Which approved statement or source supports this requirement?",
+        "Undefined terminology": "How should the undefined term be defined in the project glossary or business rules?",
+        "Potential conflict": "Which accountable stakeholder should resolve the conflicting expectations?",
+        "Duplication": "Should the overlapping requirements be merged, separated by scope, or linked?",
+        "Missing security or compliance requirements": "Has security, privacy, and compliance applicability been confirmed?",
+    }
+    questions: list[str] = []
+    seen: set[tuple[str | None, str]] = set()
+    for issue in issues:
+        key = (issue.requirement_id, issue.check)
+        if key in seen:
+            continue
+        seen.add(key)
+        prefix = f"{issue.requirement_id}: " if issue.requirement_id else "Project: "
+        questions.append(prefix + prompts.get(issue.check, issue.recommendation))
+    return questions

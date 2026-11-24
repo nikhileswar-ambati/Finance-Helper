@@ -1,32 +1,99 @@
 # Finance Helper
 
-Finance Helper is a local, finance-only requirements workspace. It captures stakeholder context, indexes finance project sources, retrieves passages for evidence-grounded requirement drafts, runs quality checks, and suggests a delivery approach for human review.
+Finance Helper is a local, finance-only requirements workspace. It collects stakeholder context, indexes project sources, retrieves evidence for requirement drafts, checks quality, and prepares delivery and governance material for human review.
 
-## Start
+## Features
 
-Use the project's virtual environment in PowerShell:
+- Finance-only project intake with a stakeholder interview and financial source uploads (TXT, Markdown, CSV, PDF, DOCX).
+- Sensitive identifier masking before indexing, ChromaDB project collections, local embeddings, and optional OpenAI-compatible LLM support.
+- Evidence-linked requirement drafts with editing, approval, clarification requests, and deterministic quality checks.
+- RBI reference summaries, reviewable control suggestions, risk register, and source-to-requirement traceability.
+- Agent run history, audit and approval records, evaluation metrics, and derived requirements artefacts.
+- Context-aware SDLC recommendations with human approval gates.
+- IEEE 830-1998 SRS export to Word (`.docx`) and Markdown requirements pack export.
 
-    .\.venv\Scripts\Activate.ps1
-    uvicorn app.main:app --reload
+RBI applicability suggestions are advisory and require authorised compliance or legal review. This prototype has no authentication or multi-user isolation.
 
-The workspace is at http://127.0.0.1:8000. Python package installation can use requirements.txt. Optional model and embedding provider settings are documented in .env.example.
+## Setup and run (Windows PowerShell)
 
-## Workflow
+Use 64-bit Python 3.13. Run these commands from the project directory. Recreate the virtual environment with `--clear` so compiled packages cannot be carried over from a different Python version.
 
-1. Describe a financial-services workflow, objective, and user roles. Unrelated project scopes are declined by both the intake form and API.
-2. Answer at most five follow-up questions.
-3. Upload your own finance source documents (TXT, Markdown, CSV, PDF, or DOCX). Uploaded contents are size-limited and common sensitive identifiers are masked before indexing.
-4. Review retrieved source passages and create requirement drafts.
-5. Refine requirement wording and acceptance criteria, record review status, run quality checks, and review the delivery approach.
-6. Download project JSON or a Markdown requirements pack.
+```powershell
+# 1. If the app is running, stop it with Ctrl+C. Deactivate only if a venv is active:
+if ($env:VIRTUAL_ENV) { deactivate }
 
-The local mode uses ChromaDB with project-scoped collections and deterministic local hashed embeddings. LLM generation is optional; without a configured provider, the app uses evidence-only drafts. Outputs need human review. This prototype has no authentication, role enforcement, or multi-user isolation. Scanned PDFs require OCR. Legal determinations remain outside the application scope.
+# 2. Create or rebuild the Python 3.13 virtual environment
+py -3.13 -m venv --clear .venv
+
+# 3. Activate it
+.\.venv\Scripts\Activate.ps1
+
+# If PowerShell blocks activation, allow it for this terminal only and activate again:
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+
+# 4. Install dependencies
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+
+# 5. Confirm the compiled Pydantic extension and application import correctly
+python -c "import pydantic_core._pydantic_core; import app.main; print('Imports OK')"
+
+# 6. Create local configuration (skip if .env already exists)
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+
+# 7. Start the web app
+python -m uvicorn app.main:app --reload
+```
+
+Open the workspace at <http://127.0.0.1:8000> and the API docs at <http://127.0.0.1:8000/docs>. Stop the server with `Ctrl+C`.
+
+### Repair an existing environment
+
+If startup reports `No module named 'pydantic_core._pydantic_core'`, the virtual environment contains a compiled wheel for a different Python version. The most reliable fix is to stop the server, deactivate the environment, then rerun the setup commands above. To repair the currently activated environment without clearing it, reinstall every requirement for its active Python interpreter:
+
+```powershell
+python -m pip install --force-reinstall --no-cache-dir -r requirements.txt
+python -c "import pydantic_core._pydantic_core; import app.main; print('Imports OK')"
+```
+
+A plain `pip install -r requirements.txt` can leave the incompatible binary in place when pip thinks the package version is already satisfied.
+
+The app runs in local mode without API credentials. To enable LLM generation and adaptive interview questions, edit `.env` and set `LLM_API_KEY`, `LLM_BASE_URL`, and `LLM_MODEL` for your OpenAI-compatible provider. To enable remote embeddings, set `EMBEDDING_MODEL` as well. Keep `.env` private; never commit API keys.
+
+## Other useful commands
+
+```powershell
+# Check service health while the server is running
+Invoke-RestMethod http://127.0.0.1:8000/api/health
+
+# Run automated tests
+python -m pytest -q
+
+# Leave the virtual environment
+deactivate
+```
+
+For Command Prompt, activate with `.venv\Scripts\activate.bat`. On macOS/Linux, create the environment with `python3 -m venv .venv`, activate with `source .venv/bin/activate`, install with `python -m pip install -r requirements.txt`, then run `python -m uvicorn app.main:app --reload`.
+
+## Added API endpoints
+
+- `GET /api/knowledge-base/rbi` — list the RBI reference pack and applicability notice.
+- `POST /api/interview/next-question` — choose the next unanswered interview topic, using a configured LLM or local fallback.
+- `GET /api/projects/{project_id}/agent-runs` — view the staged analysis run history.
+- `GET /api/projects/{project_id}/artefacts` — retrieve SRS, user stories, use cases, traceability, risk, and compliance artefacts as JSON.
+- `GET /api/projects/{project_id}/evaluation` — retrieve citation, acceptance, control, issue, and human-review metrics.
+- `POST /api/projects/{project_id}/srs` — generate the IEEE 830-1998 Word document.
+- `GET /api/projects/{project_id}/srs/download` — download the generated SRS.
+
+Existing routes cover project intake, source retrieval, requirements, edits, approval, clarifications, SDLC review, and JSON/Markdown export. Browse `/docs` for the full interactive API reference.
 
 ## Project layout
 
-- app/main.py: FastAPI routes and project intake
-- app/services/: document handling, retrieval, generation, quality, delivery scoring, and storage
-- app/templates/ and app/static/: Finance Helper interface
-- tests/: automated test suite
-
-Runtime finance project records and vector indexes are stored under data/. The bundled demo portfolio and example source content have been cleared.
+- `app/main.py` and `app/features.py`: finance intake and feature API routes.
+- `app/services/`: document handling, RAG, requirement generation, compliance, risk, evaluation, artefacts, agents, SRS, SDLC, and storage.
+- `app/prompts/`: requirement and interview prompt templates.
+- `app/templates/` and `app/static/`: Finance Helper interface.
+- `sample_data/`: example source material.
+- `tests/`: automated tests.
+- `data/`: local JSON project records, ChromaDB index, and generated SRS files.

@@ -66,7 +66,7 @@ def generate_requirements(functionality: str, chunks: list[dict]) -> list[Requir
             id=f"REQ-{index:03d}", statement=item["statement"],
             categories=[Category(value) for value in item.get("categories", ["Functional"])],
             source_stakeholder=linked[0].get("document_name"),
-            evidence=[Evidence(document_id=source["document_id"], document_name=source["document_name"], chunk_id=source["id"], excerpt=source["text"][:500], relevance=source["relevance"]) for source in linked],
+            evidence=[Evidence(document_id=source["document_id"], document_name=source["document_name"], chunk_id=source["id"], excerpt=source["text"][:500], relevance=source["relevance"], source_url=source.get("source_url"), source_version=source.get("source_version"), effective_date=source.get("effective_date")) for source in linked],
             business_justification=item["business_justification"], priority=item.get("priority", "Should"), dependencies=item.get("dependencies", []),
             assumptions=item.get("assumptions", []), acceptance_criteria=item.get("acceptance_criteria", []),
             applicable_policy=item.get("applicable_policy"), risk_level=item.get("risk_level", "Medium"),
@@ -75,3 +75,24 @@ def generate_requirements(functionality: str, chunks: list[dict]) -> list[Requir
     if not requirements:
         raise RuntimeError("The LLM response included no requirements with valid evidence references.")
     return requirements
+
+
+def select_interview_question(functionality: str, answers: dict[str, str], candidates: list[dict[str, str]]) -> dict:
+    """Select and phrase one remaining stakeholder interview question."""
+    recent_answer = ""
+    if answers:
+        recent_answer = list(answers.values())[-1].strip()[:400]
+    candidate_info = [{"key": item["key"], "topic": item["topic"]} for item in candidates]
+    instructions = (PROMPTS / "interview_question.txt").read_text(encoding="utf-8")
+    prompt = (
+        f"{instructions}\n\n"
+        f"Functionality: {functionality[:300]}\n"
+        f"Latest answer: {recent_answer}\n"
+        f"Candidates: {json.dumps(candidate_info)}"
+    )
+    response = _post_chat(prompt)
+    allowed = {item["key"] for item in candidates}
+    key, topic, question = response.get("key"), response.get("topic"), response.get("prompt")
+    if key not in allowed or not isinstance(topic, str) or not isinstance(question, str) or len(question.strip()) < 10:
+        raise RuntimeError("The configured LLM returned an invalid interview question.")
+    return {"key": key, "topic": topic.strip()[:80], "prompt": question.strip()[:500]}

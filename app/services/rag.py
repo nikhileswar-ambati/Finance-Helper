@@ -5,6 +5,9 @@ import os
 import hashlib
 import logging
 import re
+import ssl
+
+import certifi
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -14,6 +17,7 @@ from chromadb.errors import NotFoundError
 
 
 logger = logging.getLogger(__name__)
+TLS_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 
 
 class RagConfigurationError(RuntimeError):
@@ -31,11 +35,16 @@ def provider_configured() -> bool:
     return bool(os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY"))
 
 
+def embedding_provider_configured() -> bool:
+    """Return whether a remote embeddings model is explicitly configured."""
+    return provider_configured() and bool(os.getenv("EMBEDDING_MODEL", "").strip())
+
+
 def _embed(texts: list[str]) -> list[list[float]]:
     """Embed with the configured provider, retaining local retrieval on provider failures."""
     if not texts:
         return []
-    if not provider_configured():
+    if not embedding_provider_configured():
         return [_local_embed(text) for text in texts]
     payload = {"model": os.getenv("EMBEDDING_MODEL", "text-embedding-3-small"), "input": texts}
     base_url = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
@@ -46,7 +55,7 @@ def _embed(texts: list[str]) -> list[list[float]]:
         method="POST",
     )
     try:
-        with urlopen(request, timeout=35) as response:  # noqa: S310 - operator-configured API URL
+        with urlopen(request, timeout=35, context=TLS_CONTEXT) as response:  # noqa: S310 - operator-configured API URL
             result = json.loads(response.read().decode("utf-8"))
         vectors = [item["embedding"] for item in sorted(result["data"], key=lambda item: item["index"])]
         if len(vectors) != len(texts) or not all(isinstance(vector, list) and vector for vector in vectors):
@@ -86,7 +95,7 @@ class VectorStore:
         """Return safe-to-display settings without exposing provider credentials."""
         return {
             "vector_database": "ChromaDB",
-            "embedding_model": os.getenv("EMBEDDING_MODEL", "text-embedding-3-small") if provider_configured() else "Local hashed embeddings (384 dimensions)",
+            "embedding_model": os.getenv("EMBEDDING_MODEL", "text-embedding-3-small") if embedding_provider_configured() else "Local hashed embeddings (384 dimensions)",
             "llm_model": os.getenv("LLM_MODEL", "gpt-4o-mini") if provider_configured() else "Evidence-only fallback",
             "collection_scope": "One persistent collection per project",
         }
@@ -107,6 +116,8 @@ class VectorStore:
                     "document_type": str(document.get("document_type") or ""),
                     "applicability": str(document.get("applicability") or ""),
                     "uploaded_by": str(document.get("uploaded_by") or ""),
+                    "source_url": str(document.get("source_url") or ""),
+                    "source_version": str(document.get("version") or document.get("source_version") or ""),
                     "created_at": str(document.get("created_at") or ""),
                 })
         if not texts:
@@ -151,6 +162,8 @@ class VectorStore:
                 "applicability": item.get("applicability") or None,
                 "uploaded_by": item.get("uploaded_by") or None,
                 "created_at": item.get("created_at") or None,
+                "source_url": item.get("source_url") or None,
+                "source_version": item.get("source_version") or None,
                 "vector_relevance": max(0.0, 1 - (distance / 2)),
             }
             for text, item, distance in zip(documents, metadata, distances, strict=True)

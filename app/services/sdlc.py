@@ -15,9 +15,10 @@ def _score(base: int, adjustments: list[tuple[bool, int]]) -> int:
     return max(0, min(100, base + sum(amount for applies, amount in adjustments if applies)))
 
 
-def recommend(requirements: list[Requirement]) -> SdlcRecommendation:
+def recommend(requirements: list[Requirement], project_context: str = "") -> SdlcRecommendation:
     """Rank requested SDLC models from requirement signals without inventing project facts."""
     categories = {category for requirement in requirements for category in requirement.categories}
+    source_text = (project_context + " " + " ".join(item.statement + " " + " ".join(e.excerpt for e in item.evidence) for item in requirements)).lower()
     needs_review = sum(requirement.approval_status != "Approved" for requirement in requirements)
     measurable = sum(bool(requirement.acceptance_criteria) and not any("reviewer" in item.lower() for item in requirement.acceptance_criteria) for requirement in requirements)
     high_risk = sum(requirement.risk_level == "High" for requirement in requirements)
@@ -26,8 +27,10 @@ def recommend(requirements: list[Requirement]) -> SdlcRecommendation:
     integration_ids = _requirement_ids(requirements, {Category.INTEGRATION, Category.DATA})
     stakeholder_ids = _requirement_ids(requirements, {Category.STAKEHOLDER, Category.USABILITY, Category.BUSINESS})
 
-    stability_score = 2 if needs_review else 4
-    clarity_score = 4 if measurable == len(requirements) else 2 if measurable == 0 else 3
+    controlled = any(term in source_text for term in ("formally approved", "controlled change", "change management", "requirements approval"))
+    formal_verification = any(term in source_text for term in ("verification and validation", "unit testing", "integration testing", "acceptance testing"))
+    stability_score = 4 if controlled or not needs_review else 2
+    clarity_score = 4 if measurable == len(requirements) or (formal_verification and "acceptance criteria" in source_text) else 2 if measurable == 0 else 3
     risk_score = 5 if high_risk or risk_ids else 3
     complexity_score = 4 if integration_ids else 2
     early_prototype_score = 4 if clarity_score <= 2 or complexity_score >= 4 else 3
@@ -38,7 +41,7 @@ def recommend(requirements: list[Requirement]) -> SdlcRecommendation:
     risk_analysis_score = 5 if risk_score >= 5 or complexity_score >= 4 else 3
 
     factors = [
-        _factor("Requirement stability", stability_score, "Needs validation" if needs_review else "Baseline approved", "Draft or unapproved requirements indicate that stability has not yet been demonstrated." if needs_review else "All requirements have an explicit approval status.", [requirement.id for requirement in requirements if requirement.approval_status != "Approved"]),
+        _factor("Requirement stability", stability_score, "Evidence indicates controlled baseline" if controlled else "Needs validation" if needs_review else "Baseline approved", "Project sources describe controlled change or formal approval." if controlled else "Draft or unapproved requirements indicate that stability has not yet been demonstrated." if needs_review else "All requirements have an explicit approval status.", [requirement.id for requirement in requirements if requirement.approval_status != "Approved"]),
         _factor("Requirement clarity", clarity_score, "Low" if clarity_score <= 2 else "Moderate" if clarity_score == 3 else "High", "Measured from the presence of concrete, non-placeholder acceptance criteria.", [requirement.id for requirement in requirements if not requirement.acceptance_criteria or any("reviewer" in item.lower() for item in requirement.acceptance_criteria)]),
         _factor("Risk", risk_score, "High" if risk_score >= 5 else "Medium", "Derived from stated high risk and security, privacy, regulatory, or audit classifications.", risk_ids),
         _factor("Complexity", complexity_score, "High" if complexity_score >= 4 else "Low", "Integration and data-management requirements increase coordination and technical complexity.", integration_ids),

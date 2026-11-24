@@ -13,12 +13,15 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.schemas import Project, RequirementUpdate
+from app.schemas import ApprovalDecision, AgentRun, Project, RequirementUpdate
+from app.services.agents import ComplianceRiskAgent, DocumentationAgent, GovernanceSdlcAgent, RequirementsAgent
+from app.services.compliance import catalogue as rbi_catalogue
 from app.services.documents import chunk_text, extract_text, mask_sensitive
+from app.services.knowledge import approved_documents
 from app.services.generator import generate_evidence_drafts
 from app.services.llm import enabled as llm_enabled, generate_requirements as generate_llm_requirements
 from app.services.quality import analyse
-from app.services.rag import RagConfigurationError, VectorStore, provider_configured
+from app.services.rag import RagConfigurationError, VectorStore, embedding_provider_configured, provider_configured
 from app.services.sdlc import recommend
 from app.services.storage import ProjectStore
 
@@ -26,6 +29,10 @@ ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT.parent / ".env")
 store = ProjectStore()
 vector_store = VectorStore()
+requirements_agent = RequirementsAgent()
+compliance_risk_agent = ComplianceRiskAgent()
+documentation_agent = DocumentationAgent()
+governance_sdlc_agent = GovernanceSdlcAgent()
 FINANCE_SCOPE = re.compile(r"\b(finance|financial|fintech|bank(?:ing)?|credit|debit|loan|lending|mortgage|payment|payroll|insurance|investment|investing|wealth|brokerage|trading|securities|portfolio|accounting|ledger|treasury|remittance|money transfer|fund transfer|wallet|merchant|invoice|billing|reconciliation|underwriting|kyc|aml|deposit|withdrawal|interest rate|forex|currency exchange|tax reporting|financial crime|fraud detection|capital market|financial statement)\b", re.I)
 def is_finance_project(text: str) -> bool:
     return bool(FINANCE_SCOPE.search(text))
@@ -61,6 +68,17 @@ def retrieve_project_evidence(project: Project, query: str) -> list[dict]:
         return vector_store.retrieve(project.id, query)
 
 
+
+
+def audit(project: Project, action: str, detail: str) -> None:
+    project.audit_log.append({"at": datetime.now(timezone.utc).isoformat(), "action": action, "detail": detail})
+
+
+def record_agent_run(project: Project, agent: str, responsibility: str, status: str, output: str) -> None:
+    project.agent_runs.append(AgentRun(agent=agent, responsibility=responsibility, status=status, output=output, at=datetime.now(timezone.utc)))
+    audit(project, "agent_completed", f"{agent}: {output}")
+
+
 @app.get("/")
 def home() -> FileResponse:
     return FileResponse(ROOT / "templates" / "index.html")
@@ -70,7 +88,8 @@ def home() -> FileResponse:
 def rag_status() -> JSONResponse:
     return JSONResponse({
         **vector_store.configuration(),
-        "embedding_provider_configured": provider_configured(),
+        "embedding_provider_configured": embedding_provider_configured(),
+        "generation_provider_configured": provider_configured(),
         "generation_mode": "LLM generation with citation validation" if llm_enabled() else "Evidence-only drafts until LLM_API_KEY is configured",
         "evidence_policy": "Retrieved content is untrusted evidence; regulatory conclusions require human review.",
     })
@@ -151,6 +170,12 @@ async def create_project(
     financial_context = " ".join([functionality, *answers.keys(), *answers.values()] + [chunk.get("text", "") for doc in documents for chunk in doc.get("chunks", [])])
     if not is_finance_project(financial_context):
         raise HTTPException(422, "Not suitable: Finance Helper only accepts projects related to finance or financial services.")
+    for reference in approved_documents():
+        reference["source"] = reference["name"]
+        reference["document_type"] = "RBI reference summary"
+        reference["applicability"] = functionality
+        reference["uploaded_by"] = "Approved reference pack"
+        documents.append(reference)
     project = Project(
         id=uuid4().hex[:12], functionality=functionality,
         business_objective=answers.get("business objective", ""),
@@ -209,7 +234,12 @@ def generate_requirements(project_id: str) -> JSONResponse:
             project.requirements = generate_evidence_drafts(project.functionality, evidence)
     else:
         project.requirements = generate_evidence_drafts(project.functionality, evidence)
-    project.quality_issues = analyse(project.requirements)
+    requirements_agent.run(project, evidence, project.requirements)
+    compliance_risk_agent.run(project)
+    documentation_agent.run(project)
+    record_agent_run(project, requirements_agent.name, requirements_agent.responsibility, "Completed", f"Reviewed {len(project.requirements)} evidence-linked requirement drafts.")
+    record_agent_run(project, compliance_risk_agent.name, compliance_risk_agent.responsibility, "Waiting for human review", f"Prepared {len(project.risks)} reviewable risks and {len(project.traceability)} traceability records.")
+    record_agent_run(project, documentation_agent.name, documentation_agent.responsibility, "Completed", "Updated evaluation metrics and exportable requirements artefacts.")
     store.save(project)
     return JSONResponse(project.model_dump(mode="json"))
 
@@ -227,6 +257,9 @@ def update_approval(project_id: str, requirement_id: str, status: str = Form(...
         raise HTTPException(404, "Requirement not found.")
     previous = requirement.approval_status
     requirement.approval_status = status
+    project.approvals.append(ApprovalDecision(id=uuid4().hex[:12], subject_type="Requirement", subject_id=requirement_id, decision=status if status in {"Approved", "Rejected", "Needs review"} else "Needs review", reviewer="Local reviewer", reviewer_role="Project reviewer", rationale="", at=datetime.now(timezone.utc)))
+    documentation_agent.run(project)
+    audit(project, "requirement_approval", f"{requirement_id}: {previous} -> {status}")
     store.save(project)
     return JSONResponse(requirement.model_dump(mode="json"))
 
@@ -239,7 +272,8 @@ def sdlc_analysis(project_id: str) -> JSONResponse:
         raise HTTPException(404, "Project not found.") from exc
     if not project.requirements:
         raise HTTPException(422, "Generate requirements before SDLC analysis.")
-    project.sdlc = recommend(project.requirements)
+    project.sdlc = governance_sdlc_agent.run(project)
+    record_agent_run(project, governance_sdlc_agent.name, governance_sdlc_agent.responsibility, "Waiting for human review", f"Recommended {project.sdlc.recommended_sdlc}; approval remains with the project reviewer.")
     store.save(project)
     return JSONResponse(project.sdlc.model_dump(mode="json"))
 
@@ -256,6 +290,9 @@ def update_sdlc_approval(project_id: str, status: str = Form(...)) -> JSONRespon
         raise HTTPException(422, "Run the SDLC analysis before recording an approval decision.")
     previous = project.sdlc.approval_status
     project.sdlc.approval_status = status
+    project.approvals.append(ApprovalDecision(id=uuid4().hex[:12], subject_type="SDLC", subject_id=project_id, decision=status, reviewer="Local reviewer", reviewer_role="Project reviewer", rationale="", at=datetime.now(timezone.utc)))
+    documentation_agent.run(project)
+    audit(project, "sdlc_approval", f"{previous} -> {status}")
     store.save(project)
     return JSONResponse(project.sdlc.model_dump(mode="json"))
 
@@ -288,6 +325,8 @@ def edit_requirement(project_id: str, requirement_id: str, changes: RequirementU
     if requirement.approval_status == "Approved":
         requirement.approval_status = "Needs review"
     project.quality_issues = analyse(project.requirements)
+    compliance_risk_agent.run(project)
+    documentation_agent.run(project)
     store.save(project)
     return JSONResponse(requirement.model_dump(mode="json"))
 
@@ -303,6 +342,9 @@ def request_clarification(project_id: str, requirement_id: str) -> JSONResponse:
         raise HTTPException(404, "Requirement not found.")
     previous = requirement.approval_status
     requirement.approval_status = "Needs review"
+    project.clarification_questions = [f"{requirement_id}: Confirm the expected behavior and measurable acceptance criteria."]
+    documentation_agent.run(project)
+    audit(project, "clarification_requested", requirement_id)
     store.save(project)
     return JSONResponse({"requirement_id": requirement_id, "status": requirement.approval_status})
 
@@ -383,3 +425,7 @@ def export_artifacts(project_id: str) -> PlainTextResponse:
     else:
         lines.append("No SDLC recommendation has been run.")
     return PlainTextResponse("\n".join(lines), media_type="text/markdown", headers={"Content-Disposition": f'attachment; filename="finance-helper-srs-{project.id}.md"'})
+
+
+from app.features import router as feature_router
+app.include_router(feature_router)
