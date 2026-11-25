@@ -1,13 +1,17 @@
 """ZIP-added interview, governance, evaluation, and SRS API endpoints."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
+from pydantic import ValidationError
 
 from app.schemas import InterviewQuestionRequest, InterviewQuestionResponse
 from app.services.compliance import catalogue as rbi_catalogue
+from app.services.documents import chunk_text, extract_text, mask_sensitive, retrieve
+from app.services.knowledge import approved_documents
 from app.services.llm import enabled as llm_enabled, select_interview_question
 from app.services.storage import ProjectStore
 
@@ -44,15 +48,66 @@ def rbi_knowledge_base() -> JSONResponse:
 
 
 @router.post("/api/interview/next-question", response_model=InterviewQuestionResponse)
-def next_interview_question(request: InterviewQuestionRequest) -> InterviewQuestionResponse:
+async def next_interview_question(
+    functionality: str = Form(...),
+    answers_json: str = Form("{}"),
+    conversation_json: str = Form("[]"),
+    asked_question_keys_json: str = Form("[]"),
+    files: list[UploadFile] = File(default=[]),
+) -> InterviewQuestionResponse:
+    try:
+        request = InterviewQuestionRequest(
+            functionality=functionality.strip(),
+            answers=json.loads(answers_json),
+            conversation=json.loads(conversation_json),
+            asked_question_keys=json.loads(asked_question_keys_json),
+        )
+    except (json.JSONDecodeError, ValidationError, TypeError) as exc:
+        raise HTTPException(422, "Interview answers or conversation could not be processed.") from exc
+
     asked = set(request.asked_question_keys)
     candidates = [item for item in INTERVIEW_TOPICS if item["key"] not in asked]
     if not candidates:
         return InterviewQuestionResponse(mode="Local fallback", completed=True)
-    answers = {key: value.strip()[:4000] for key, value in request.answers.items() if value.strip()}
+    answers = {key[:80]: mask_sensitive(value.strip()[:4000]) for key, value in request.answers.items() if value.strip()}
+    conversation = [
+        {"topic": turn.topic, "question": turn.question, "answer": mask_sensitive(turn.answer.strip()[:4000])}
+        for turn in request.conversation[-5:]
+    ]
+
+    documents = approved_documents()
+    for document in documents:
+        document["source"] = document["name"]
+        document["document_type"] = "RBI reference summary"
+        document["uploaded_by"] = "Approved reference pack"
+    for upload in files:
+        if not upload.filename:
+            continue
+        content = await upload.read(5_000_001)
+        if len(content) > 5_000_000:
+            raise HTTPException(413, f"{Path(upload.filename).name} exceeds the 5 MB upload limit.")
+        try:
+            source_text = mask_sensitive(extract_text(upload.filename, content))
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(422, f"{Path(upload.filename).name} could not be read for evidence retrieval.") from exc
+        if source_text.strip():
+            documents.append({
+                "id": f"INTAKE-{len(documents) + 1:03d}",
+                "name": Path(upload.filename).name,
+                "chunks": [chunk.__dict__ for chunk in chunk_text(source_text)],
+            })
+
+    retrieval_query = " ".join([
+        request.functionality,
+        *answers.keys(), *answers.values(),
+        *(f"{turn['topic']} {turn['question']} {turn['answer']}" for turn in conversation),
+    ])
+    evidence = [item for item in retrieve(retrieval_query, documents, limit=6) if item["relevance"] > 0][:5]
     if llm_enabled():
         try:
-            return InterviewQuestionResponse(**select_interview_question(request.functionality.strip(), answers, candidates), mode="Groq adaptive agent")
+            return InterviewQuestionResponse(**select_interview_question(request.functionality, answers, candidates, conversation, evidence), mode="Groq adaptive agent")
         except RuntimeError as exc:
             raise HTTPException(503, str(exc)) from exc
     topic = candidates[0]
@@ -61,7 +116,6 @@ def next_interview_question(request: InterviewQuestionRequest) -> InterviewQuest
         prompt=f"To complete the project picture, describe the {topic['topic'].lower()} for this solution.",
         mode="Local fallback",
     )
-
 
 @router.post("/api/projects/{project_id}/srs")
 def generate_srs(project_id: str) -> JSONResponse:

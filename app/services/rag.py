@@ -25,19 +25,34 @@ class RagConfigurationError(RuntimeError):
 
 
 def _api_key() -> str:
-    key = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
+    base_url = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
+    key = (os.getenv("GROQ_API_KEY", "").strip() if "api.groq.com" in base_url
+           else (os.getenv("LLM_API_KEY", "").strip() or os.getenv("OPENAI_API_KEY", "").strip()))
     if not key:
-        raise RagConfigurationError("Set LLM_API_KEY or OPENAI_API_KEY in .env before using the remote provider.")
+        raise RagConfigurationError("Set GROQ_API_KEY in .env before using Groq generation.")
     return key
 
 
 def provider_configured() -> bool:
-    return bool(os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY"))
+    base_url = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
+    if "api.groq.com" in base_url:
+        return bool(os.getenv("GROQ_API_KEY", "").strip())
+    return bool(os.getenv("LLM_API_KEY", "").strip() or os.getenv("OPENAI_API_KEY", "").strip())
+
+
+def _embedding_base_url() -> str:
+    return os.getenv("EMBEDDING_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+
+
+def _embedding_api_key() -> str | None:
+    return (os.getenv("EMBEDDING_API_KEY", "").strip()
+            or os.getenv("OPENAI_API_KEY", "").strip()
+            or (os.getenv("LLM_API_KEY", "").strip() if _embedding_base_url() == os.getenv("LLM_BASE_URL", "").rstrip("/") else ""))
 
 
 def embedding_provider_configured() -> bool:
     """Return whether a remote embeddings model is explicitly configured."""
-    return provider_configured() and bool(os.getenv("EMBEDDING_MODEL", "").strip())
+    return bool(_embedding_api_key() and os.getenv("EMBEDDING_MODEL", "").strip())
 
 
 def _embed(texts: list[str]) -> list[list[float]]:
@@ -47,11 +62,11 @@ def _embed(texts: list[str]) -> list[list[float]]:
     if not embedding_provider_configured():
         return [_local_embed(text) for text in texts]
     payload = {"model": os.getenv("EMBEDDING_MODEL", "text-embedding-3-small"), "input": texts}
-    base_url = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+    base_url = _embedding_base_url()
     request = Request(
         f"{base_url}/embeddings",
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Authorization": f"Bearer {_api_key()}", "Content-Type": "application/json"},
+        headers={"Authorization": f"Bearer {_embedding_api_key()}", "Content-Type": "application/json"},
         method="POST",
     )
     try:
@@ -96,7 +111,7 @@ class VectorStore:
         return {
             "vector_database": "ChromaDB",
             "embedding_model": os.getenv("EMBEDDING_MODEL", "text-embedding-3-small") if embedding_provider_configured() else "Local hashed embeddings (384 dimensions)",
-            "llm_model": os.getenv("LLM_MODEL", "gpt-4o-mini") if provider_configured() else "Evidence-only fallback",
+            "llm_model": os.getenv("LLM_MODEL", "openai/gpt-oss-20b") if provider_configured() else "Evidence-only fallback",
             "collection_scope": "One persistent collection per project",
         }
 

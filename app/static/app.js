@@ -4,6 +4,8 @@ let questionIndex = 0;
 let questionQueue = [];
 let askedQuestionKeys = new Set();
 const interviewAnswers = {};
+let interviewHistory = [];
+let groqFallbackNoticeShown = false;
 const $ = (selector) => document.querySelector(selector);
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>\'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
 const INTERVIEW_QUESTION_LIMIT = 5;
@@ -204,18 +206,50 @@ function renderQuestion() {
   $("#questionTopic").textContent = question.topic; $("#interviewQuestion").textContent = question.prompt;
   $("#interviewAnswer").value = interviewAnswers[question.key] || ""; $("#interviewAnswer").focus();
 }
-function advanceInterview(saveAnswer) {
+async function advanceInterview(saveAnswer) {
   const question = questionQueue[questionIndex]; const answer = $("#interviewAnswer").value.trim();
   if (saveAnswer && !answer) { toast("Add an answer or choose Skip for now."); return; }
   if (answer) interviewAnswers[question.key] = answer;
-  if (questionQueue.length < INTERVIEW_QUESTION_LIMIT) { const nextQuestion = selectNextQuestion(answer); if (nextQuestion) { askedQuestionKeys.add(nextQuestion.key); questionQueue.push(nextQuestion); } }
-  questionIndex += 1; renderQuestion();
+  interviewHistory.push({ topic: question.topic, question: question.prompt, answer });
+  const continueButton = $("#continueInterview");
+  const skipButton = $("#skipInterviewQuestion");
+  continueButton.disabled = true; skipButton.disabled = true;
+  const originalLabel = continueButton.textContent;
+  continueButton.textContent = "Getting your next question…";
+  try {
+    if (questionQueue.length < INTERVIEW_QUESTION_LIMIT) {
+      const questionRequest = new FormData();
+      questionRequest.append("functionality", $("#functionality").value.trim());
+      questionRequest.append("answers_json", JSON.stringify(interviewAnswers));
+      questionRequest.append("conversation_json", JSON.stringify(interviewHistory));
+      questionRequest.append("asked_question_keys_json", JSON.stringify([...askedQuestionKeys]));
+      [...$("#files").files].forEach((file) => questionRequest.append("files", file));
+      const nextQuestion = await request("/api/interview/next-question", { method: "POST", body: questionRequest });
+      if (nextQuestion.mode === "Local fallback" && !groqFallbackNoticeShown) {
+        toast("Add a Groq API key in .env to enable AI follow-up questions.");
+        groqFallbackNoticeShown = true;
+      }
+      if (nextQuestion.key && nextQuestion.prompt) {
+        askedQuestionKeys.add(nextQuestion.key);
+        questionQueue.push(nextQuestion);
+      }
+    }
+    questionIndex += 1;
+    renderQuestion();
+  } catch (error) {
+    interviewHistory.pop();
+    toast(error.message || "Could not get the next interview question.");
+  } finally {
+    continueButton.disabled = false; skipButton.disabled = false;
+    continueButton.textContent = originalLabel;
+  }
 }
 
 $("#interviewStartForm").addEventListener("submit", (event) => {
   event.preventDefault(); const functionality = $("#functionality").value.trim(); const objective = $("#businessObjective").value.trim(); const users = $("#usersRoles").value.trim();
   if (functionality.length < 3 || !objective || !users) { toast("Complete the functionality, business objective, and users/roles to begin."); return; }
   Object.keys(interviewAnswers).forEach((key) => delete interviewAnswers[key]);
+  interviewHistory = []; groqFallbackNoticeShown = false;
   interviewAnswers["business objective"] = objective; interviewAnswers["users and roles"] = users;
   const openingQuestion = selectOpeningQuestion(`${functionality} ${objective} ${users}`.toLowerCase());
   questionQueue = [openingQuestion]; askedQuestionKeys = new Set([openingQuestion.key]); questionIndex = 0;

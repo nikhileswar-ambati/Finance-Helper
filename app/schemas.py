@@ -23,9 +23,16 @@ class Category(StrEnum):
     OPERATIONAL = "Operational / maintenance"
 
 
+class InterviewTurn(BaseModel):
+    topic: str = Field(min_length=1, max_length=80)
+    question: str = Field(min_length=1, max_length=500)
+    answer: str = Field(default="", max_length=4000)
+
+
 class InterviewQuestionRequest(BaseModel):
     functionality: str = Field(min_length=3, max_length=500)
     answers: dict[str, str] = Field(default_factory=dict)
+    conversation: list[InterviewTurn] = Field(default_factory=list, max_length=5)
     asked_question_keys: list[str] = Field(default_factory=list)
 
 

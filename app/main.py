@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.schemas import ApprovalDecision, AgentRun, Project, RequirementUpdate
@@ -80,8 +80,17 @@ def record_agent_run(project: Project, agent: str, responsibility: str, status: 
 
 
 @app.get("/")
-def home() -> FileResponse:
-    return FileResponse(ROOT / "templates" / "index.html")
+def home() -> HTMLResponse:
+    stylesheet = ROOT / "static" / "styles.css"
+    script = ROOT / "static" / "app.js"
+    asset_version = max(stylesheet.stat().st_mtime_ns, script.stat().st_mtime_ns)
+    page = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+    page = page.replace("/static/styles.css", f"/static/styles.css?v={asset_version}")
+    page = page.replace("/static/app.js", f"/static/app.js?v={asset_version}")
+    return HTMLResponse(
+        content=page,
+        headers={"Cache-Control": "no-store, max-age=0", "Pragma": "no-cache"},
+    )
 
 
 @app.get("/api/rag/status")
@@ -90,7 +99,7 @@ def rag_status() -> JSONResponse:
         **vector_store.configuration(),
         "embedding_provider_configured": embedding_provider_configured(),
         "generation_provider_configured": provider_configured(),
-        "generation_mode": "LLM generation with citation validation" if llm_enabled() else "Evidence-only drafts until LLM_API_KEY is configured",
+        "generation_mode": "Groq generation with citation validation" if llm_enabled() else "Evidence-only drafts until GROQ_API_KEY is configured",
         "evidence_policy": "Retrieved content is untrusted evidence; regulatory conclusions require human review.",
     })
 

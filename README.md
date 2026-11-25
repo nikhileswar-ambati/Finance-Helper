@@ -59,7 +59,17 @@ python -c "import pydantic_core._pydantic_core; import app.main; print('Imports 
 
 A plain `pip install -r requirements.txt` can leave the incompatible binary in place when pip thinks the package version is already satisfied.
 
-The app runs in local mode without API credentials. To enable LLM generation and adaptive interview questions, edit `.env` and set `LLM_API_KEY`, `LLM_BASE_URL`, and `LLM_MODEL` for your OpenAI-compatible provider. To enable remote embeddings, set `EMBEDDING_MODEL` as well. Keep `.env` private; never commit API keys.
+The app uses Groq for requirements generation and adaptive stakeholder interviews. Create a Groq API key, then add it to `.env`:
+
+```dotenv
+GROQ_API_KEY=your-groq-api-key
+LLM_BASE_URL=https://api.groq.com/openai/v1
+LLM_MODEL=openai/gpt-oss-20b
+```
+
+After each interview response, Finance Helper sends the project workflow, previous question-and-answer transcript, and unanswered topic list to Groq to choose and write the next follow-up. Without `GROQ_API_KEY`, the app uses local fallback questions. Keep `.env` private and never commit API keys.
+
+Embeddings use the separate optional `EMBEDDING_API_KEY` and `EMBEDDING_BASE_URL` settings. For OpenAI embeddings, set `OPENAI_API_KEY`; otherwise the app uses local embeddings. The existing `EMBEDDING_MODEL` setting selects the model used by that embeddings provider.
 
 ## Other useful commands
 
