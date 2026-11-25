@@ -165,7 +165,6 @@ async function loadProject(id) {
   showEmpty("#requirementsEmpty", !project.requirements.length);
   $("#generateButton").disabled = false;
   $("#sdlcButton").disabled = !project.requirements.length;
-  location.hash = "workspace";
 }
 function startNewProject() {
   projectId = null;
@@ -173,8 +172,8 @@ function startNewProject() {
   ["#filterCategory", "#filterPriority", "#filterApproval", "#filterConfidence"].forEach((selector) => { $(selector).value = ""; });
   $("#functionality").value = ""; $("#businessObjective").value = ""; $("#usersRoles").value = ""; $("#files").value = "";
   ["#jurisdiction", "#effectiveDate", "#documentVersion", "#applicability", "#uploadedBy"].forEach((selector) => { $(selector).value = ""; });
-  $("#workspace-title").textContent = "Start with the people and workflow";
-  $("#workspaceDescription").textContent = "An adaptive interview creates an auditable project record and prepares source material for retrieval.";
+  $("#workspace-title").textContent = "Create project requirements";
+  $("#workspaceDescription").textContent = "Describe your project to generate clear, evidence-based requirements.";
   $("#projectState").innerHTML = `<span class="status-dot"></span> No project loaded`;
   $("#interviewStartForm").classList.remove("is-hidden"); $("#interviewSession").classList.add("is-hidden"); $("#interviewComplete").classList.add("is-hidden");
   $("#documentsPanel").classList.add("is-hidden"); showEmpty("#knowledgeEmpty", true);
@@ -254,12 +253,25 @@ $("#sdlcButton").addEventListener("click", async () => {
   try { displaySdlc(await request(`/api/projects/${projectId}/sdlc`, { method: "POST" })); const project = await request(`/api/projects/${projectId}`);  toast("SDLC recommendation generated. Human approval remains required."); }
   catch (error) { toast(error.message); } finally { button.disabled = false; }
 });
-document.querySelectorAll(".nav-link").forEach((link) => link.addEventListener("click", () => {
-  document.querySelectorAll(".nav-link").forEach((item) => item.classList.remove("active")); link.classList.add("active");
+const sectionLinks = [...document.querySelectorAll(".nav-link")];
+sectionLinks.forEach((link) => link.addEventListener("click", (event) => {
+  const target = document.querySelector(link.getAttribute("href"));
+  if (!target) return;
+  event.preventDefault();
+  sectionLinks.forEach((item) => item.classList.toggle("active", item === link));
+  const mobileBarHeight = window.matchMedia("(max-width: 720px)").matches
+    ? document.querySelector(".sidebar").getBoundingClientRect().height + 12
+    : 16;
+  const top = window.scrollY + target.getBoundingClientRect().top - mobileBarHeight;
+  window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
 }));
 $("#requirementFilters").querySelectorAll("select").forEach((select) => select.addEventListener("change", () => displayRequirements({ requirements: currentProjectRequirements })));
-$("#newProject").addEventListener("click", startNewProject);
-$("#heroNew").addEventListener("click", startNewProject);
+$("#newProject").addEventListener("click", (event) => { event.preventDefault(); startNewProject(); });
+$("#heroNew").addEventListener("click", (event) => { event.preventDefault(); startNewProject(); });
+document.querySelector(".brand").addEventListener("click", (event) => {
+  event.preventDefault();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
 refreshDashboard().catch((error) => { $("#projectList").innerHTML = `<p class="empty-state">Unable to load portfolio: ${escapeHtml(error.message)}</p>`; toast(error.message); });
 
 // Reject non-financial project requests before the intake flow starts.

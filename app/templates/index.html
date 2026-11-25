@@ -2,27 +2,26 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#101e33"><link rel="icon" href="data:,">
-  <title>FinReq Studio</title><link rel="stylesheet" href="/static/styles.css">
+  <meta name="theme-color" content="#172b2a"><link rel="icon" href="data:,">
+  <title>Finance Helper</title><link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
   <aside class="sidebar">
-    <a class="brand" href="#overview" aria-label="FinReq Studio home"><span class="brand-mark">F</span><span>FinReq <span class="brand-light">Studio</span></span></a>
+    <a class="brand" href="#workspace" aria-label="Finance Helper home"><span class="brand-mark">F</span><span>Finance <span class="brand-light">Helper</span></span></a>
     <div class="workspace-label"><i></i> REQUIREMENTS WORKSPACE</div>
     <nav class="primary-nav" aria-label="Main navigation">
-      <a class="nav-link active" href="#overview"><span>⌂</span> Home</a>
-      <a class="nav-link" href="#workspace"><span>＋</span> New project</a>
-      <a class="nav-link" href="#knowledge"><span>▤</span> Source library</a>
-      <a class="nav-link" href="#requirements"><span>✓</span> Requirements</a>
-      <a class="nav-link" href="#quality"><span>◈</span> Quality review</a>
-      <a class="nav-link" href="#sdlc"><span>↗</span> Delivery approach</a>
+      <a class="nav-link active" href="#workspace"><span>＋</span> Create project</a>
+      <a class="nav-link" href="#knowledge"><span>▤</span> Sources</a>
+      <a class="nav-link" href="#requirements"><span>✓</span> Generated requirements</a>
+      <a class="nav-link" href="#quality"><span>◈</span> Review queue</a>
+      <a class="nav-link" href="#sdlc"><span>↗</span> SDLC analysis</a>
     </nav>
     <div class="sidebar-note"><span>◆</span><div><b>Human review required</b><small>All drafts need review before approval.</small></div></div>
-    <div class="sidebar-foot">FINREQ STUDIO <i>•</i> LOCAL WORKSPACE</div>
+    <div class="sidebar-foot">FINANCE HELPER <i>•</i> LOCAL WORKSPACE</div>
   </aside>
   <main class="main-area">
     <header class="topbar">
-      <div><div class="breadcrumb">FINREQ STUDIO <span>/</span> <b>WORKSPACE</b></div><h1>FinReq Studio</h1></div>
+      <div><div class="breadcrumb">FINANCE HELPER <span>/</span> <b>WORKSPACE</b></div><h1>Finance Helper</h1></div>
       <div class="top-actions"><span class="environment-pill"><i></i> Local workspace</span><a id="artifactLink" class="button button-outline is-hidden" title="Download requirements pack" download>Download requirements</a><a id="exportLink" class="button button-outline is-hidden" title="Export project data" download>Export project</a><a id="newProject" class="button" href="#workspace">＋ New project</a></div>
     </header>
     <section id="overview" class="page-section overview-section">
@@ -66,7 +65,7 @@
     <section id="sdlc" class="page-section">
       <div class="section-heading"><div><span class="eyebrow">AGENT 2 · GOVERNANCE ADVISORY</span><h2>SDLC analysis</h2></div><div class="interview-actions"><button id="sdlcButton" type="button" disabled class="button">Run governance &amp; SDLC analysis</button></div></div><div id="sdlcPanel" class="is-hidden"><div id="sdlcResult"></div></div><div id="sdlcEmpty" class="surface-card empty-state">Generate requirements before running the SDLC analysis.</div>
     </section>
-    <footer><span>FINREQ STUDIO</span><span>Human review required</span></footer>
+    <footer><span>FINANCE HELPER</span><span>Human review required</span></footer>
   </main>
   <div id="toast" role="status" aria-live="polite"></div><script src="/static/app.js"></script>
 </body></html>

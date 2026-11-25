@@ -1,4 +1,4 @@
-"""The staged multi-agent workflow used by FinReq Studio.
+"""The staged multi-agent workflow used by Finance Helper.
 
 Specialised agents extract requirements, assess compliance/risk, derive
 artefacts, and recommend an SDLC. They never approve requirements or make a
