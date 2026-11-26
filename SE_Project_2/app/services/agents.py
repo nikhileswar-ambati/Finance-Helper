@@ -6,8 +6,9 @@ legal determination; those decisions remain with human reviewers.
 """
 from __future__ import annotations
 
+import os
+
 from app.schemas import Project, Requirement, SdlcRecommendation
-from app.services.generator import generate_evidence_drafts
 from app.services.llm import enabled as llm_enabled, generate_requirements
 from app.services.quality import analyse, clarification_questions
 from app.services.sdlc import recommend
@@ -27,16 +28,11 @@ class RequirementsAgent:
         if requirements is not None:
             project.requirements = requirements
             self.generation_mode = "provided baseline"
-        elif llm_enabled():
-            try:
-                project.requirements = generate_requirements(brief, evidence)
-                self.generation_mode = "Groq-assisted"
-            except (RuntimeError, ValueError):
-                project.requirements = generate_evidence_drafts(brief, evidence)
-                self.generation_mode = "evidence-only fallback"
         else:
-            project.requirements = generate_evidence_drafts(brief, evidence)
-            self.generation_mode = "evidence-only"
+            if not llm_enabled():
+                raise RuntimeError("Requirement generation needs an API key. Configure GROQ_API_KEY and/or OPENAI_API_KEY in .env.")
+            project.requirements = generate_requirements(brief, evidence)
+            self.generation_mode = "Groq with OpenAI fallback" if os.getenv("GROQ_API_KEY", "").strip() else "OpenAI"
         project.quality_issues = analyse(project.requirements)
         project.clarification_questions = clarification_questions(project.quality_issues)
         return project.requirements

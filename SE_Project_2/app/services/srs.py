@@ -3,10 +3,12 @@ from __future__ import annotations
 
 from datetime import datetime
 from io import BytesIO
+import re
+import textwrap
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Pt
+from docx.shared import Inches, Pt, RGBColor
 
 from app.schemas import Project, Requirement
 
@@ -34,6 +36,138 @@ def _add_group(document: Document, requirements: list[Requirement], empty_messag
             _add_requirement(document, requirement)
     else:
         document.add_paragraph(empty_message)
+
+
+def _short(text: str, limit: int = 76) -> str:
+    text = re.sub(r"\s+", " ", text).strip().rstrip(".")
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rsplit(" ", 1)[0] + "..."
+
+
+def _use_case_label(statement: str, limit: int = 32) -> str:
+    text = re.sub(r"\s+", " ", statement).strip().rstrip(".")
+    text = re.sub(r"^(?:the\s+)?(?:system|application|platform)\s+(?:shall|must|should|will)\s+(?:allow|enable)\s+.*?\bto\s+", "", text, flags=re.I)
+    text = re.sub(
+        r"^(?:the\s+)?(?:system|application|platform)\s+(?:shall|must|should|will)\s+let\s+.*?\b(submit|review|record|update|view|manage|approve|reject|track|create|upload|download|search|generate|receive|process|check|verify|maintain|transfer|pay|apply|open|close|delete|edit)\s+",
+        r"\1 ", text, flags=re.I,
+    )
+    text = re.sub(r"^(?:the\s+)?(?:system|application|platform)\s+(?:shall|must|should|will)\s+", "", text, flags=re.I)
+    text = text[:1].upper() + text[1:] if text else "Use the system"
+    return _short(text, limit)
+
+
+def _add_diagram(document: Document, lines: list[str]) -> None:
+    """Render one tidy, editable monospaced UML figure directly in Word."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    paragraph = document.add_paragraph()
+    paragraph.paragraph_format.left_indent = Inches(0.08)
+    paragraph.paragraph_format.right_indent = Inches(0.08)
+    paragraph.paragraph_format.space_before = Pt(4)
+    paragraph.paragraph_format.space_after = Pt(10)
+    paragraph.paragraph_format.line_spacing = 1.0
+    paragraph.paragraph_format.keep_together = True
+    p_pr = paragraph._p.get_or_add_pPr()
+    shading = OxmlElement("w:shd")
+    shading.set(qn("w:fill"), "F4F8F6")
+    p_pr.append(shading)
+    borders = OxmlElement("w:pBdr")
+    for edge in ("top", "left", "bottom", "right"):
+        border = OxmlElement(f"w:{edge}")
+        border.set(qn("w:val"), "single")
+        border.set(qn("w:sz"), "6")
+        border.set(qn("w:space"), "5")
+        border.set(qn("w:color"), "B8CEC5")
+        borders.append(border)
+    p_pr.append(borders)
+
+    for index, line in enumerate(lines):
+        if index:
+            paragraph.add_run().add_break()
+        run = paragraph.add_run(line or " ")
+        run.font.name = "Courier New"
+        run.font.size = Pt(8.5)
+        run.font.color.rgb = RGBColor(28, 63, 55)
+        text_node = run._r.find(qn("w:t"))
+        if text_node is not None:
+            text_node.set(qn("xml:space"), "preserve")
+
+
+def _add_uml_diagrams(document: Document, project: Project, functional: list[Requirement]) -> None:
+    """Add compact, editable Word-native UML views derived from saved project data."""
+    document.add_heading("4. UML Diagrams", level=1)
+    document.add_paragraph(
+        "These diagrams are draft models generated from the project brief, user roles, and functional requirements. "
+        "Where the source does not define actors, interactions, or states, the diagram labels that flow as conceptual and it must be validated by stakeholders."
+    )
+
+    # Use case view: actors are outside the system boundary and each use case
+    # is drawn as an oval, using plain Word text rather than a table.
+    actors = [part.strip() for part in re.split(r"[,;\n/]+", project.users_and_roles or "") if part.strip()]
+    actors = actors[:3] or ["Project user (confirm role)"]
+    use_cases = [_short(item.statement) for item in functional[:6]]
+    if not use_cases:
+        use_cases = [_short(project.functionality or project.project_brief or "Use the application")]
+    document.add_heading("4.1 Use case diagram", level=2)
+    actor_labels = [f"<<actor>> {_short(actor, 20)}" for actor in actors]
+    box_indent = 40
+    box_width = 42
+    lines = [f"Use case diagram - {_short(project.functionality or 'Project system', 48)}", ""]
+    lines.append(" " * box_indent + "+" + "-" * box_width + "+")
+    lines.append(" " * box_indent + "|" + f"  SYSTEM: {_short(project.functionality or 'Project system', 30)}".ljust(box_width) + "|")
+    lines.append(" " * box_indent + "|" + " " * box_width + "|")
+    lines.extend(f"{label:<30}--+" for label in actor_labels)
+    lines.append(" " * 32 + "|")
+    for case in use_cases:
+        use_case_label = f"  (( {_use_case_label(case, 32)} ))"
+        lines.append(" " * 32 + "+------>|" + use_case_label.ljust(box_width) + "|")
+    lines.append(" " * box_indent + "+" + "-" * box_width + "+")
+    _add_diagram(document, lines)
+    document.add_paragraph("Use cases come from functional requirements; confirm which roles may perform each action.")
+
+    # A concise sequence view. It shows the user-to-system interaction pattern
+    # and uses requirement statements for the operation labels.
+    document.add_heading("4.2 Sequence diagram", level=2)
+    primary_actor = _short(actors[0], 36)
+    system = _short(project.functionality or "Project system", 48)
+    operation = _use_case_label(functional[0].statement, 32) if functional else f"Request: {_short(project.functionality or 'use the system', 25)}"
+    line_width = 83
+    left_lifeline = 12
+    right_lifeline = 54
+    request_prefix = "|--- " + _short(operation, 32) + " "
+    request_padding = right_lifeline - left_lifeline + 1 - len(request_prefix) - 3
+    request_line = " " * left_lifeline + request_prefix + "-" * max(1, request_padding) + "->|"
+    response_label = " result / status "
+    response_padding = right_lifeline - left_lifeline + 1 - 3 - len(response_label) - 1
+    response_line = " " * left_lifeline + "|<-" + "-" * max(1, response_padding) + response_label + "|"
+    lines = [
+        "Sequence diagram - conceptual request interaction",
+        f"{primary_actor[:25]:^25}{system[:25]:^58}",
+        " " * left_lifeline + "|" + " " * (right_lifeline - left_lifeline - 1) + "|",
+        " " * left_lifeline + "|" + " " * (right_lifeline - left_lifeline - 1) + "|",
+        request_line[:line_width],
+        " " * left_lifeline + "|" + " " * (right_lifeline - left_lifeline - 1) + "|",
+        response_line[:line_width],
+        " " * left_lifeline + "|" + " " * (right_lifeline - left_lifeline - 1) + "|",
+    ]
+    _add_diagram(document, lines)
+    document.add_paragraph("Conceptual interaction: service calls, external systems, and error paths were not specified unless listed in the requirements.")
+
+    # State view is explicitly a conceptual lifecycle because the brief may not
+    # specify domain states. Keep paths editable in the generated document.
+    document.add_heading("4.3 State diagram", level=2)
+    lines = [
+        "State diagram - conceptual request lifecycle",
+        "",
+        "[*] --> [Draft] --> [Submitted] --> [In progress] --> [Completed] --> [*]",
+        "                                      |",
+        "                                      +--> [Rejected] --> [*]",
+        "                                      +--> [Needs correction] --> [Draft]",
+    ]
+    _add_diagram(document, lines)
+    document.add_paragraph("Conceptual state flow for a submitted project request. Confirm state names, transitions, and failure handling with stakeholders.")
 
 
 def create_ieee_830_document(project: Project) -> bytes:
@@ -97,6 +231,7 @@ def create_ieee_830_document(project: Project) -> bytes:
     _add_group(document, constraints, "No design constraints are currently recorded.")
     document.add_heading("3.5 Software System Attributes", level=2)
     _add_group(document, attributes, "No additional quality, security, privacy, audit, or operational requirements are currently recorded.")
+    _add_uml_diagrams(document, project, functional)
     document.add_heading("Appendix A. Review Notes", level=1)
     document.add_paragraph("Requirements with Draft or Needs review status are not an approved baseline. Review the associated source evidence before approval.")
 

@@ -26,18 +26,20 @@ class RagConfigurationError(RuntimeError):
 
 def _api_key() -> str:
     base_url = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
-    key = (os.getenv("GROQ_API_KEY", "").strip() if "api.groq.com" in base_url
+    key = ((os.getenv("GROQ_API_KEY", "").strip() or os.getenv("OPENAI_API_KEY", "").strip())
+           if "api.groq.com" in base_url
            else (os.getenv("LLM_API_KEY", "").strip() or os.getenv("OPENAI_API_KEY", "").strip()))
     if not key:
-        raise RagConfigurationError("Set GROQ_API_KEY in .env before using Groq generation.")
+        raise RagConfigurationError("Set GROQ_API_KEY and/or OPENAI_API_KEY in .env before using LLM generation.")
     return key
 
 
 def provider_configured() -> bool:
-    base_url = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
-    if "api.groq.com" in base_url:
-        return bool(os.getenv("GROQ_API_KEY", "").strip())
-    return bool(os.getenv("LLM_API_KEY", "").strip() or os.getenv("OPENAI_API_KEY", "").strip())
+    return bool(
+        os.getenv("GROQ_API_KEY", "").strip()
+        or os.getenv("OPENAI_API_KEY", "").strip()
+        or os.getenv("LLM_API_KEY", "").strip()
+    )
 
 
 def _embedding_base_url() -> str:
@@ -111,7 +113,8 @@ class VectorStore:
         return {
             "vector_database": "ChromaDB",
             "embedding_model": os.getenv("EMBEDDING_MODEL", "text-embedding-3-small") if embedding_provider_configured() else "Local hashed embeddings (384 dimensions)",
-            "llm_model": os.getenv("LLM_MODEL", "openai/gpt-oss-20b") if provider_configured() else "Evidence-only fallback",
+            "llm_model": (os.getenv("LLM_MODEL", "openai/gpt-oss-20b") if os.getenv("GROQ_API_KEY", "").strip()
+                          else os.getenv("OPENAI_MODEL", "gpt-4o-mini")) if provider_configured() else "Not configured",
             "collection_scope": "One persistent collection per project",
         }
 

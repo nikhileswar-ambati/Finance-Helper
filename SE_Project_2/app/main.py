@@ -18,7 +18,7 @@ from app.services.agents import ComplianceRiskAgent, DocumentationAgent, Governa
 from app.services.compliance import catalogue as rbi_catalogue
 from app.services.documents import chunk_text, extract_text, mask_sensitive
 from app.services.knowledge import approved_documents
-from app.services.llm import enabled as llm_enabled
+from app.services.llm import enabled as llm_enabled, provider_mode
 from app.services.quality import analyse
 from app.services.rag import RagConfigurationError, VectorStore, embedding_provider_configured, provider_configured
 from app.services.sdlc import recommend
@@ -48,7 +48,7 @@ async def lifespan(_: FastAPI):
     app_port = os.getenv("APP_PORT", "8001")
     print(f"  App:      http://127.0.0.1:{app_port}")
     print("  API docs: http://127.0.0.1:8000/docs")
-    print(f"  Generation: {'Groq enabled' if llm_enabled() else 'local fallback (configure GROQ_API_KEY)'}")
+    print(f"  Generation: {provider_mode()}")
     print("  RAG:      ChromaDB + OpenAI-compatible embeddings")
     print("  Storage:  local JSON project data and ChromaDB vectors")
     print("  Stop:     press Ctrl+C")
@@ -103,7 +103,7 @@ def rag_status() -> JSONResponse:
         **vector_store.configuration(),
         "embedding_provider_configured": embedding_provider_configured(),
         "generation_provider_configured": provider_configured(),
-        "generation_mode": "Groq generation with citation validation" if llm_enabled() else "Evidence-only drafts until GROQ_API_KEY is configured",
+        "generation_mode": f"{provider_mode()} with evidence validation" if llm_enabled() else "Configure GROQ_API_KEY and/or OPENAI_API_KEY",
         "evidence_policy": "Retrieved content is untrusted evidence; regulatory conclusions require human review.",
     })
 
@@ -217,7 +217,10 @@ def generate_requirements(project_id: str) -> JSONResponse:
         raise HTTPException(422, "No retrievable evidence was found in the uploaded documents.")
     if max((item["relevance"] for item in evidence), default=0) < 0.12:
         raise HTTPException(422, "The retrieved sources do not provide sufficient evidence. Add or select a more relevant source before generating requirements.")
-    requirements_agent.run(project, evidence)
+    try:
+        requirements_agent.run(project, evidence)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(503, str(exc)) from exc
     compliance_risk_agent.run(project)
     documentation_agent.run(project)
     record_agent_run(project, requirements_agent.name, requirements_agent.responsibility, "Completed", f"Generated {len(project.requirements)} evidence-linked drafts ({requirements_agent.generation_mode}).")
@@ -235,7 +238,10 @@ def sdlc_analysis(project_id: str) -> JSONResponse:
         raise HTTPException(404, "Project not found.") from exc
     if not project.requirements:
         raise HTTPException(422, "Generate requirements before SDLC analysis.")
-    project.sdlc = governance_sdlc_agent.run(project)
+    try:
+        project.sdlc = governance_sdlc_agent.run(project)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
     record_agent_run(project, governance_sdlc_agent.name, governance_sdlc_agent.responsibility, "Waiting for human review", f"Recommended {project.sdlc.recommended_sdlc}; approval remains with the project reviewer.")
     store.save(project)
     return JSONResponse(project.sdlc.model_dump(mode="json"))
