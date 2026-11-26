@@ -77,8 +77,11 @@ class GovernanceSdlcAgent:
         project_context = " ".join(
             chunk.get("text", "")
             for document in project.documents
+            if document.get("uploaded_by") != "Approved reference pack"
             for chunk in document.get("chunks", [])
         )
+        if project.project_brief:
+            project_context = f"{project.project_brief} {project_context}"
         project.sdlc = recommend(project.requirements, project_context)
         return project.sdlc
 

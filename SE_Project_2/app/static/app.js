@@ -33,44 +33,18 @@ function displayRetrievedEvidence(result) {
 }
 function displayRequirements(project) {
   currentProjectRequirements = project.requirements || currentProjectRequirements;
-  const category = $("#filterCategory").value, priority = $("#filterPriority").value, approval = $("#filterApproval").value, confidence = $("#filterConfidence").value;
-  project = { ...project, requirements: currentProjectRequirements.filter((req) => (!category || req.categories.includes(category)) && (!priority || req.priority === priority) && (!approval || req.approval_status === approval) && (!confidence || (confidence === "low" && req.confidence < .5) || (confidence === "medium" && req.confidence >= .5 && req.confidence < .8) || (confidence === "high" && req.confidence >= .8))) };
+  project = { ...project, requirements: currentProjectRequirements };
   const list = $("#requirementsPanel");
-  list.innerHTML = project.requirements.length ? project.requirements.map((req) => `<article class="requirement"><div class="requirement-head"><div><span class="req-id">${escapeHtml(req.id)}</span><h3>${escapeHtml(req.statement)}</h3><div class="tags">${req.categories.map((category) => `<span class="tag">${escapeHtml(category)}</span>`).join("")}</div></div><label class="status-label">Approval status<select class="status" data-id="${escapeHtml(req.id)}" aria-label="Approval status for ${escapeHtml(req.id)}">${["Draft", "Needs review", "Approved", "Rejected"].map((status) => `<option ${req.approval_status === status ? "selected" : ""}>${status}</option>`).join("")}</select></label></div><div class="requirement-grid"><div><span class="field-label">Business justification</span><p>${escapeHtml(req.business_justification)}</p></div><div><span class="field-label">Confidence / risk</span><p>${Math.round(req.confidence * 100)}% confidence · ${escapeHtml(req.risk_level)} risk · ${escapeHtml(req.priority)}</p></div><div><span class="field-label">Acceptance criteria</span><p>${req.acceptance_criteria.length ? req.acceptance_criteria.map(escapeHtml).join("<br>") : "Needs definition"}</p></div><div><span class="field-label">Reasoning</span><p>${escapeHtml(req.reasoning)}</p></div></div>${req.evidence.map((evidence) => `<div class="evidence"><span class="field-label">Evidence · ${escapeHtml(evidence.document_name)} / ${escapeHtml(evidence.chunk_id)}${evidence.source_version ? ` · ${escapeHtml(evidence.source_version)}` : ""}</span><p>${escapeHtml(evidence.excerpt)}${evidence.source_url ? ` <a href="${escapeHtml(evidence.source_url)}" target="_blank" rel="noopener">Official source</a>` : ""}</p></div>`).join("")}<details class="edit-panel"><summary>Edit draft fields</summary><form class="edit-form" data-id="${escapeHtml(req.id)}"><label>Requirement statement<textarea name="statement" minlength="10" required>${escapeHtml(req.statement)}</textarea></label><label>Business justification<textarea name="business_justification">${escapeHtml(req.business_justification)}</textarea></label><label>Priority<select name="priority">${["Must", "Should", "Could"].map((value) => `<option ${req.priority === value ? "selected" : ""}>${value}</option>`).join("")}</select></label><label>Acceptance criteria <small>One criterion per line</small><textarea name="acceptance_criteria">${escapeHtml(req.acceptance_criteria.join("\n"))}</textarea></label><div class="interview-actions"><button type="submit">Save changes</button><button class="request-clarification button-outline" type="button" data-id="${escapeHtml(req.id)}">Request clarification</button></div></form></details></article>`).join("") : `<div class="surface-card empty-state">No requirements match these filters.</div>`;
-  const riskCount = (project.risks || []).length;
-  $("#requirementCount").textContent = `${project.requirements.length} draft(s) · ${riskCount} reviewable risk(s)`;
-  const metrics = project.evaluation;
-  const risks = project.risks || [];
-  const mappings = (project.requirements || []).flatMap((item) => item.compliance_mappings || []);
-  const controls = mappings.length;
-  $("#governanceSummary").innerHTML = `<strong>Governance review</strong><p>${controls} reviewable RBI control suggestion(s) · ${risks.length} risk(s) · ${metrics ? `${Math.round(metrics.citation_coverage * 100)}% citation coverage` : "evaluation pending"}</p>${mappings.length ? `<ul>${mappings.slice(0, 5).map((mapping) => `<li>${escapeHtml(mapping.control_id)} — ${escapeHtml(mapping.rationale)} <a href="${escapeHtml(mapping.source_url)}" target="_blank" rel="noopener">Source</a></li>`).join("")}</ul>` : ""}${risks.length ? `<ul>${risks.slice(0, 5).map((risk) => `<li>${escapeHtml(risk.level)} · ${escapeHtml(risk.title)} — ${escapeHtml(risk.mitigation)}</li>`).join("")}</ul>` : ""}`;
-  $("#governanceSummary").classList.toggle("is-hidden", controls === 0 && risks.length === 0);
+  list.innerHTML = project.requirements.length ? project.requirements.map((req) => `<article class="requirement"><div class="requirement-head"><span class="req-id">${escapeHtml(req.id)}</span><h3>${escapeHtml(req.statement)}</h3></div></article>`).join("") : `<div class="surface-card empty-state">No requirement statements generated yet.</div>`;
+  $("#requirementCount").textContent = `${project.requirements.length} requirement statement${project.requirements.length === 1 ? "" : "s"}`;
   const srsButton = $("#srsButton");
   if (srsButton) srsButton.disabled = !currentProjectRequirements.length;
   $("#generateButton").textContent = currentProjectRequirements.length ? "Regenerate requirements" : "Generate requirements";
-  list.classList.remove("is-hidden"); showEmpty("#requirementsEmpty", !currentProjectRequirements.length); showEmpty("#requirementFilters", currentProjectRequirements.length > 0);
-  list.querySelectorAll("select").forEach((select) => select.addEventListener("change", async () => {
-    const data = new FormData(); data.append("status", select.value);
-    try { await request(`/api/projects/${projectId}/requirements/${encodeURIComponent(select.dataset.id)}/approval`, { method: "POST", body: data }); await refreshAnalysis(); await refreshDashboard(); toast("Review status updated."); }
-    catch (error) { toast(error.message); }
-  }));
-  list.querySelectorAll(".edit-form").forEach((form) => form.addEventListener("submit", async (event) => {
-    event.preventDefault(); const data = new FormData(form);
-    const payload = { statement: data.get("statement"), business_justification: data.get("business_justification"), priority: data.get("priority"), acceptance_criteria: String(data.get("acceptance_criteria") || "").split("\n").map((line) => line.trim()).filter(Boolean) };
-    try { await request(`/api/projects/${projectId}/requirements/${encodeURIComponent(form.dataset.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); await refreshAnalysis(); toast("Draft updated; approved baseline returned to review where needed."); }
-    catch (error) { toast(error.message); }
-  }));
-  list.querySelectorAll(".request-clarification").forEach((button) => button.addEventListener("click", async () => {
-    try { await request(`/api/projects/${projectId}/requirements/${encodeURIComponent(button.dataset.id)}/clarification`, { method: "POST" }); await refreshAnalysis(); toast("Clarification requested."); }
-    catch (error) { toast(error.message); }
-  }));
-}
-function displayIssues(issues) {
-  const list = $("#qualityPanel");
-  list.innerHTML = issues.length ? issues.map((issue) => `<article class="issue"><div><span class="severity severity-${escapeHtml(issue.severity.toLowerCase())}">${escapeHtml(issue.severity)}</span><p class="muted">${escapeHtml(issue.check)}</p></div><div><strong>${escapeHtml(issue.requirement_id || "Project")}</strong><p>${escapeHtml(issue.message)}</p><p class="recommendation">${escapeHtml(issue.recommendation)}</p></div></article>`).join("") : `<div class="surface-card empty-state">No rule-based issues found. Human review is still required.</div>`;
-  $("#issueCount").textContent = `${issues.length} finding${issues.length === 1 ? "" : "s"}`; list.classList.remove("is-hidden"); showEmpty("#qualityEmpty", false);
+  list.classList.remove("is-hidden"); showEmpty("#requirementsEmpty", !currentProjectRequirements.length);
 }
 function displaySdlc(sdlc) {
+  const recalculateButton = $("#sdlcButton");
+  if (recalculateButton) recalculateButton.textContent = "Recalculate SDLC scores";
   $("#sdlcResult").innerHTML = `<div class="sdlc-overview"><div><p class="eyebrow">Recommended model · ${escapeHtml(sdlc.approval_status || "Needs review")}</p><h3>${escapeHtml(sdlc.recommended_sdlc)}</h3><p>${escapeHtml(sdlc.justification)}</p><div class="sdlc-actions"><span class="review-pill">Human decision required</span><button type="button" data-sdlc-status="Approved">Approve</button><button class="button-outline" type="button" data-sdlc-status="Rejected">Reject</button></div></div><div class="rankings">${sdlc.options.map((option) => `<div class="ranking"><span>${escapeHtml(option.name)}</span><div class="bar"><span style="width:${option.score}%"></span></div><strong>${option.score}%</strong></div>`).join("")}</div></div><div class="srs-export"><div><span class="eyebrow">AGENT 2 · SRS GENERATION</span><strong>IEEE 830-1998 SRS</strong><p>Generated by the separate SRS Generation Agent from the project brief and reviewed requirement baseline.</p></div><button id="srsButton" type="button">Generate SRS</button></div><div class="workflow"><p class="eyebrow">SDLC decision factors</p><div class="factor-grid">${sdlc.factors.map((factor) => `<div class="factor"><h4>${escapeHtml(factor.name)}</h4><strong>${escapeHtml(factor.value)}</strong><p>${escapeHtml(factor.rationale)}</p>${factor.requirement_ids.length ? `<small>Linked: ${escapeHtml(factor.requirement_ids.join(", "))}</small>` : ""}</div>`).join("")}</div></div><div class="workflow"><p class="eyebrow">Project-specific workflow</p><div class="workflow-grid">${sdlc.workflow.map((phase) => `<div class="phase"><h4>${escapeHtml(phase.phase)}</h4><p>${escapeHtml(phase.activities.join(" · "))}</p><p><strong>Gate:</strong> ${escapeHtml(phase.gate)}</p><small>${escapeHtml(phase.roles.join(", "))}</small></div>`).join("")}</div></div>`;
   $("#sdlcPanel").classList.remove("is-hidden"); showEmpty("#sdlcEmpty", false);
   const srsButton = $("#srsButton");
@@ -90,21 +64,19 @@ function displaySdlc(sdlc) {
 async function refreshAnalysis() {
   if (!projectId) return;
   const project = await request("/api/projects/" + projectId);
-  if (project.requirements.length) { displayRequirements(project); displayIssues(project.quality_issues || []); }
+  if (project.requirements.length) displayRequirements(project);
   if (project.sdlc) displaySdlc(project.sdlc);
   $("#sdlcButton").disabled = !project.requirements.length;
   return project;
 }
 async function loadProject(id) {
   projectId = id;
-  ["#filterCategory", "#filterPriority", "#filterApproval", "#filterConfidence"].forEach((selector) => { $(selector).value = ""; });
   const project = await request(`/api/projects/${projectId}`);
   currentProjectRequirements = project.requirements || [];
-  showEmpty("#requirementFilters", currentProjectRequirements.length === 0);
   $("#functionality").value = project.project_brief || project.functionality;
   $("#projectState").innerHTML = `<span class="status-dot"></span> ${escapeHtml(project.functionality)}`;
   $("#workspace-title").textContent = "Review the loaded project";
-  $("#workspaceDescription").textContent = "The project brief, requirements, review findings, SDLC recommendation, and SRS are available below.";
+  $("#workspaceDescription").textContent = "The project brief, requirement statements, SDLC recommendation, and SRS are available below.";
   $("#projectBriefForm").classList.add("is-hidden");
   $("#exportLink").href = `/api/projects/${projectId}/export`; $("#exportLink").classList.remove("is-hidden");
   $("#artifactLink").href = `/api/projects/${projectId}/artifacts`; $("#artifactLink").classList.remove("is-hidden");
@@ -122,31 +94,28 @@ async function loadProject(id) {
 function startNewProject() {
   projectId = null;
   currentProjectRequirements = [];
-  ["#filterCategory", "#filterPriority", "#filterApproval", "#filterConfidence"].forEach((selector) => { $(selector).value = ""; });
   $("#functionality").value = ""; $("#files").value = "";
   $("#workspace-title").textContent = "Create project requirements";
   $("#workspaceDescription").textContent = "Describe the project once. Separate agents will gather requirements, run quality and SDLC analysis, and generate the SRS document.";
   $("#projectState").innerHTML = `<span class="status-dot"></span> No project selected`;
   $("#projectBriefForm").classList.remove("is-hidden");
+  $("#sdlcButton").textContent = "Run governance & SDLC analysis";
   $("#documentsPanel").classList.add("is-hidden"); showEmpty("#knowledgeEmpty", true);
   $("#requirementsPanel").classList.add("is-hidden"); showEmpty("#requirementsEmpty", true);
-  showEmpty("#requirementFilters", false);
-  $("#qualityPanel").classList.add("is-hidden"); showEmpty("#qualityEmpty", true);
   $("#sdlcPanel").classList.add("is-hidden"); showEmpty("#sdlcEmpty", true);
   $("#generateButton").disabled = true; $("#sdlcButton").disabled = true;
   $("#artifactLink").classList.add("is-hidden"); $("#exportLink").classList.add("is-hidden"); $("#srsDownloadLink").classList.add("is-hidden");
-  $("#requirementCount").textContent = "No requirements"; $("#issueCount").textContent = "No checks run";
+  $("#requirementCount").textContent = "No requirement statements";
 }
 async function refreshDashboard() {
   const projects = await request("/api/projects");
   $("#projectMetric").textContent = projects.length;
   $("#requirementMetric").textContent = projects.reduce((sum, item) => sum + item.requirements, 0);
-  $("#approvalMetric").textContent = projects.reduce((sum, item) => sum + item.pending_approvals, 0);
   $("#portfolioCount").textContent = `${projects.length} project${projects.length === 1 ? "" : "s"}`;
   $("#projectList").innerHTML = projects.length ? projects.map((item) => `<button class="project-row" data-project="${escapeHtml(item.id)}"><span class="project-avatar">${escapeHtml(item.functionality.slice(0, 1).toUpperCase())}</span><span class="project-info"><strong>${escapeHtml(item.functionality)}</strong><small>${item.documents} source(s) · ${item.requirements} requirement(s) · ${escapeHtml(new Date(item.created_at).toLocaleDateString())}</small></span><span class="project-arrow">→</span></button>`).join("") : `<p class="empty-state">No projects yet. Start a new project intake to build your first evidence library.</p>`;
   $("#projectList").querySelectorAll("[data-project]").forEach((button) => button.addEventListener("click", () => loadProject(button.dataset.project).catch((error) => toast(error.message))));
   const rag = await request("/api/rag/status");
-  $("#knowledgeHealth").innerHTML = `<span class="health-indicator"></span><span>${escapeHtml(rag.vector_database)} ready · ${escapeHtml(rag.embedding_model)}</span>`;
+  $("#knowledgeHealth").innerHTML = `<span class="health-indicator"></span><span>${escapeHtml(rag.vector_database)} ready · ${escapeHtml(rag.embedding_model)} · ${escapeHtml(rag.generation_mode)}</span>`;
 }
 $("#projectBriefForm").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -166,7 +135,7 @@ $("#projectBriefForm").addEventListener("submit", async (event) => {
     displayDocuments(created.documents, created.rag);
     displayRetrievedEvidence(await request(`/api/projects/${projectId}/retrieval`));
     const project = await request(`/api/projects/${projectId}/requirements`, { method: "POST" });
-    displayRequirements(project); displayIssues(project.quality_issues || []);
+    displayRequirements(project);
     $("#projectState").innerHTML = `<span class="status-dot"></span> Requirements ready · SDLC analysis…`;
     const sdlc = await request(`/api/projects/${projectId}/sdlc`, { method: "POST" });
     displaySdlc(sdlc); $("#sdlcButton").disabled = false;
@@ -189,7 +158,7 @@ $("#retrieveButton").addEventListener("click", async () => {
 });
 $("#generateButton").addEventListener("click", async () => {
   if (!projectId) return; const button = $("#generateButton"); button.disabled = true;
-  try { const project = await request(`/api/projects/${projectId}/requirements`, { method: "POST" }); displayRequirements(project); displayIssues(project.quality_issues); await refreshAnalysis(); await refreshDashboard(); toast("Finance requirement drafts are ready for review."); }
+  try { const project = await request(`/api/projects/${projectId}/requirements`, { method: "POST" }); displayRequirements(project); await refreshAnalysis(); await refreshDashboard(); toast("Finance requirement statements are ready."); }
   catch (error) { toast(error.message); } finally { button.disabled = false; }
 });
 $("#sdlcButton").addEventListener("click", async () => {
@@ -209,7 +178,6 @@ sectionLinks.forEach((link) => link.addEventListener("click", (event) => {
   const top = window.scrollY + target.getBoundingClientRect().top - mobileBarHeight;
   window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
 }));
-$("#requirementFilters").querySelectorAll("select").forEach((select) => select.addEventListener("change", () => displayRequirements({ requirements: currentProjectRequirements })));
 $("#newProject").addEventListener("click", (event) => { event.preventDefault(); startNewProject(); });
 $("#heroNew").addEventListener("click", (event) => { event.preventDefault(); startNewProject(); });
 document.querySelector(".brand").addEventListener("click", (event) => {

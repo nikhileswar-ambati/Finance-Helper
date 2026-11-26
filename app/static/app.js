@@ -209,6 +209,8 @@ function renderQuestion() {
 async function advanceInterview(saveAnswer) {
   const question = questionQueue[questionIndex]; const answer = $("#interviewAnswer").value.trim();
   if (saveAnswer && !answer) { toast("Add an answer or choose Skip for now."); return; }
+  const hadPreviousAnswer = Object.prototype.hasOwnProperty.call(interviewAnswers, question.key);
+  const previousAnswer = interviewAnswers[question.key];
   if (answer) interviewAnswers[question.key] = answer;
   interviewHistory.push({ topic: question.topic, question: question.prompt, answer });
   const continueButton = $("#continueInterview");
@@ -238,6 +240,8 @@ async function advanceInterview(saveAnswer) {
     renderQuestion();
   } catch (error) {
     interviewHistory.pop();
+    if (hadPreviousAnswer) interviewAnswers[question.key] = previousAnswer;
+    else delete interviewAnswers[question.key];
     toast(error.message || "Could not get the next interview question.");
   } finally {
     continueButton.disabled = false; skipButton.disabled = false;

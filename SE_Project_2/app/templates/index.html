@@ -13,7 +13,6 @@
       <a class="nav-link active" href="#workspace"><span>＋</span> Create project</a>
       <a class="nav-link" href="#knowledge"><span>▤</span> Sources</a>
       <a class="nav-link" href="#requirements"><span>✓</span> Generated requirements</a>
-      <a class="nav-link" href="#quality"><span>◈</span> Review queue</a>
       <a class="nav-link" href="#sdlc"><span>↗</span> SDLC analysis</a>
     </nav>
     <div class="sidebar-note"><span>◆</span><div><b>Human review required</b><small>All drafts need review before approval.</small></div></div>
@@ -30,7 +29,6 @@
       <div class="metric-grid">
         <article class="metric-card"><span class="metric-icon blue">▦</span><div><small>Finance projects</small><strong id="projectMetric">0</strong></div><span>In this workspace</span></article>
         <article class="metric-card"><span class="metric-icon green">✓</span><div><small>Draft requirements</small><strong id="requirementMetric">0</strong></div><span>Across your projects</span></article>
-        <article class="metric-card"><span class="metric-icon amber">◷</span><div><small>Awaiting review</small><strong id="approvalMetric">0</strong></div><span>Human review queue</span></article>
       </div>
       <div class="overview-grid">
         <section class="surface-card portfolio-card"><div class="card-heading"><div><span class="eyebrow">YOUR WORKSPACE</span><h3>Recent finance projects</h3></div><span id="portfolioCount" class="count">0 projects</span></div><div id="projectList" class="project-list"><p class="empty-state">Loading your workspace…</p></div></section>
@@ -44,7 +42,7 @@
         <div class="form-top"><span class="form-icon">F</span><div><h3>Project brief</h3><p>Include the purpose, users, key workflows, rules, and expected outcomes in one description.</p></div></div>
         <label class="wide">Describe your finance project<textarea id="functionality" rows="8" required minlength="20" maxlength="20000" placeholder="Example: Build a digital loan application platform for retail customers and loan officers. Applicants submit identity and income information, the system checks eligibility and documents, reviewers resolve exceptions, and approved applications proceed to disbursement. Include relevant workflows, controls, integrations, and expected outcomes."></textarea></label>
         <label class="upload-label">Supporting documents <span class="muted">(optional evidence for RAG)</span><input id="files" type="file" accept=".txt,.md,.csv,.pdf,.docx" multiple></label>
-        <div class="form-footer"><span><b>One submission, full workflow</b><small>Requirements, review findings, SDLC guidance, and an IEEE 830 SRS are generated automatically.</small></span><button class="button" type="submit">Generate requirements and SRS <span>→</span></button></div>
+        <div class="form-footer"><span><b>One submission, full workflow</b><small>Requirements, SDLC guidance, and an IEEE 830 SRS are generated automatically.</small></span><button class="button" type="submit">Generate requirements and SRS <span>→</span></button></div>
       </form>
     </section>
     <section id="knowledge" class="page-section">
@@ -53,11 +51,7 @@
     </section>
     <section id="requirements" class="page-section">
       <div class="section-heading"><div><span class="eyebrow">AGENT 1 · REQUIREMENT GATHERING</span><h2>Generated requirements</h2></div><span id="requirementCount" class="count">No requirements</span></div>
-      <div id="requirementFilters" class="requirement-filters is-hidden"><label>Category<select id="filterCategory"><option value="">All categories</option><option>Business</option><option>Stakeholder</option><option>Functional</option><option>Security</option><option>Privacy</option><option>Regulatory</option><option>Performance</option><option>Availability / reliability</option><option>Usability</option><option>Data management</option><option>Integration</option><option>Audit / reporting</option><option>Operational / maintenance</option></select></label><label>Priority<select id="filterPriority"><option value="">All priorities</option><option>Must</option><option>Should</option><option>Could</option></select></label><label>Review status<select id="filterApproval"><option value="">All states</option><option>Draft</option><option>Needs review</option><option>Approved</option><option>Rejected</option></select></label><label>Confidence<select id="filterConfidence"><option value="">Any confidence</option><option value="low">Below 50%</option><option value="medium">50–79%</option><option value="high">80% or higher</option></select></label></div>
       <div id="requirementsPanel" class="requirements-list is-hidden"></div><div id="requirementsEmpty" class="surface-card empty-state">Generate finance requirements from your source evidence to begin review.</div>
-    </section>
-    <section id="quality" class="page-section">
-      <div class="section-heading"><div><span class="eyebrow">QUALITY ANALYSIS</span><h2>Review queue</h2></div><span id="issueCount" class="count">No checks run</span></div><div id="qualityPanel" class="issues-list is-hidden"></div><div id="governanceSummary" class="surface-card is-hidden"></div><div id="qualityEmpty" class="surface-card empty-state">Quality checks appear after requirement drafts are generated.</div>
     </section>
     <section id="sdlc" class="page-section">
       <div class="section-heading"><div><span class="eyebrow">SDLC GOVERNANCE ADVISORY</span><h2>SDLC analysis</h2></div><div class="interview-actions"><button id="sdlcButton" type="button" disabled class="button">Run governance &amp; SDLC analysis</button></div></div><div id="sdlcPanel" class="is-hidden"><div id="sdlcResult"></div></div><div id="sdlcEmpty" class="surface-card empty-state">Generate requirements before running the SDLC analysis.</div>

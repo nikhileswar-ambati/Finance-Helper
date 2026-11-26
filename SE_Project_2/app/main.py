@@ -26,6 +26,9 @@ from app.services.storage import ProjectStore
 
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT.parent / ".env")
+# Version 2 can use its own .env, while retaining the existing SE-level Groq
+# configuration when the version-specific file has not been created yet.
+load_dotenv(ROOT.parent.parent / ".env")
 store = ProjectStore()
 vector_store = VectorStore()
 requirements_agent = RequirementsAgent()
@@ -45,6 +48,7 @@ async def lifespan(_: FastAPI):
     app_port = os.getenv("APP_PORT", "8001")
     print(f"  App:      http://127.0.0.1:{app_port}")
     print("  API docs: http://127.0.0.1:8000/docs")
+    print(f"  Generation: {'Groq enabled' if llm_enabled() else 'local fallback (configure GROQ_API_KEY)'}")
     print("  RAG:      ChromaDB + OpenAI-compatible embeddings")
     print("  Storage:  local JSON project data and ChromaDB vectors")
     print("  Stop:     press Ctrl+C")
@@ -221,26 +225,6 @@ def generate_requirements(project_id: str) -> JSONResponse:
     record_agent_run(project, documentation_agent.name, documentation_agent.responsibility, "Completed", "Updated evaluation metrics and exportable requirements artefacts.")
     store.save(project)
     return JSONResponse(project.model_dump(mode="json"))
-
-
-@app.post("/api/projects/{project_id}/requirements/{requirement_id}/approval")
-def update_approval(project_id: str, requirement_id: str, status: str = Form(...)) -> JSONResponse:
-    if status not in {"Approved", "Rejected", "Needs review", "Draft"}:
-        raise HTTPException(422, "Invalid approval status.")
-    try:
-        project = store.get(project_id)
-    except KeyError as exc:
-        raise HTTPException(404, "Project not found.") from exc
-    requirement = next((item for item in project.requirements if item.id == requirement_id), None)
-    if not requirement:
-        raise HTTPException(404, "Requirement not found.")
-    previous = requirement.approval_status
-    requirement.approval_status = status
-    project.approvals.append(ApprovalDecision(id=uuid4().hex[:12], subject_type="Requirement", subject_id=requirement_id, decision=status if status in {"Approved", "Rejected", "Needs review"} else "Needs review", reviewer="Local reviewer", reviewer_role="Project reviewer", rationale="", at=datetime.now(timezone.utc)))
-    documentation_agent.run(project)
-    audit(project, "requirement_approval", f"{requirement_id}: {previous} -> {status}")
-    store.save(project)
-    return JSONResponse(requirement.model_dump(mode="json"))
 
 
 @app.post("/api/projects/{project_id}/sdlc")

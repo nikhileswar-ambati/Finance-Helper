@@ -56,14 +56,50 @@ async def next_interview_question(
     files: list[UploadFile] = File(default=[]),
 ) -> InterviewQuestionResponse:
     try:
+        parsed_answers = json.loads(answers_json)
+        parsed_conversation = json.loads(conversation_json)
+        parsed_asked_keys = json.loads(asked_question_keys_json)
+        if not isinstance(parsed_answers, dict):
+            raise TypeError("answers_json must be an object")
+        if not isinstance(parsed_conversation, list):
+            raise TypeError("conversation_json must be an array")
+        if not isinstance(parsed_asked_keys, list):
+            raise TypeError("asked_question_keys_json must be an array")
+
+        # Keep the submitted UI and API limits aligned before Pydantic validates
+        # each turn. An older/longer transcript should not block the next answer.
+        bounded_answers = {
+            key[:80]: value[:4000]
+            for key, value in parsed_answers.items()
+            if isinstance(key, str) and isinstance(value, str)
+        }
+        bounded_conversation = []
+        for turn in parsed_conversation[-5:]:
+            if not isinstance(turn, dict):
+                bounded_conversation.append(turn)
+                continue
+            bounded_conversation.append({
+                **turn,
+                "topic": turn.get("topic", "")[:80] if isinstance(turn.get("topic", ""), str) else turn.get("topic"),
+                "question": turn.get("question", "")[:500] if isinstance(turn.get("question", ""), str) else turn.get("question"),
+                "answer": turn.get("answer", "")[:4000] if isinstance(turn.get("answer", ""), str) else turn.get("answer"),
+            })
         request = InterviewQuestionRequest(
-            functionality=functionality.strip(),
-            answers=json.loads(answers_json),
-            conversation=json.loads(conversation_json),
-            asked_question_keys=json.loads(asked_question_keys_json),
+            functionality=functionality.strip()[:20000],
+            answers=bounded_answers,
+            conversation=bounded_conversation,
+            asked_question_keys=parsed_asked_keys,
         )
-    except (json.JSONDecodeError, ValidationError, TypeError) as exc:
-        raise HTTPException(422, "Interview answers or conversation could not be processed.") from exc
+    except json.JSONDecodeError as exc:
+        raise HTTPException(422, "Interview answer data was not valid JSON. Please retry the answer.") from exc
+    except ValidationError as exc:
+        problems = [
+            f"{'.'.join(str(part) for part in error.get('loc', ())) or 'interview data'}: {error.get('msg', 'invalid value')}"
+            for error in exc.errors()[:3]
+        ]
+        raise HTTPException(422, "Interview data is invalid: " + "; ".join(problems)) from exc
+    except TypeError as exc:
+        raise HTTPException(422, "Interview answers, conversation, and asked question keys must use valid JSON objects or arrays.") from exc
 
     asked = set(request.asked_question_keys)
     candidates = [item for item in INTERVIEW_TOPICS if item["key"] not in asked]
